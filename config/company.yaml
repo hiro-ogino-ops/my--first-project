@@ -1,0 +1,126 @@
+# =============================================================
+#  note自動販売会社 — 会社設定ファイル
+#  ここを書き換えるだけで「どんな会社か」が変わります。
+# =============================================================
+
+company:
+  name: "Sample Note Works"
+  # 会社の一行定義。全部署のプロンプトの土台になります。
+  mission: "実務で今日から使えるノウハウを、読んだ人が5分で再現できる形にして売る"
+  # 誰に売るのか。ここがブレると価格もCVRもブレます。
+  audience: "副業でコンテンツ制作を始めた個人事業主・小規模チームの運営者"
+  # 何屋なのか（1〜3個に絞る。増やすほど売れなくなります）
+  domains:
+    - "生成AIを使った業務効率化"
+    - "個人向けコンテンツマーケティング"
+  tone: "断定的すぎず、必ず手順と具体例を添える。煽らない。誇大な収益表現は使わない。"
+  # 書いてはいけないこと（プロンプトにそのまま制約として渡されます）
+  prohibitions:
+    - "再現性のない収益実績の断言"
+    - "投資・医療・法律の個別具体的な助言"
+    - "出典のない統計値の記載"
+
+# ---------------- 商品設計 ----------------
+product:
+  target_chars: 6000        # 1記事あたりの目標文字数（無料＋有料）
+  free_ratio: 0.35          # 無料で読める割合。買うかどうかはほぼここで決まる
+  price:
+    min: 300                # note の有料記事の下限（要確認）
+    max: 3000
+    default: 680
+    depth_weight: 400       # 手順の具体性・独自性で上乗せする額
+    demand_weight: 300      # リサーチが観測した需要で上乗せする額
+    round_to: 10
+  tags_per_article: 5
+
+# ---------------- 部署ごとの設定 ----------------
+staff:
+  # --- リサーチ担当：毎朝、X と Threads から伸びてるポストを収集する ---
+  research:
+    sources: ["manual"]     # 有効化するソース: x / threads / manual
+    lookback_hours: 24
+    top_n: 15               # ブリーフに載せる上位シグナル数
+    themes_per_brief: 5
+    x:
+      queries:
+        - "生成AI 業務効率化 -is:retweet lang:ja"
+        - "note 有料記事 -is:retweet lang:ja"
+      min_engagement: 200   # いいね+リポスト+返信の合計がこの値未満は捨てる
+      max_results: 50
+    threads:
+      keywords: ["生成AI", "副業", "コンテンツ制作"]
+      max_results: 50
+    manual:
+      # 人手・外部ツールで集めたポストを置く場所（JSON または CSV）
+      inbox: "data/inbox"
+
+  # --- 企画担当：売れたデータと照らして次に出す note を提案する ---
+  planning:
+    topics_per_planning: 5
+    sales_lookback_days: 90
+    min_evidence: 2         # 1企画あたり最低いくつのシグナルを根拠にするか
+
+  # --- 執筆担当：売れた note とレターのデータを使って本文を書く ---
+  writing:
+    reference_top_n: 3      # 参考にする「売れた記事」の本数
+    letter_dir: "data/letters"   # 過去に配信したレター（メール等）の置き場
+
+  # --- 検品担当：別コンテキストのAIが「AIっぽい言い回し」だけを直す ---
+  qa:
+    model: "claude-opus-5"  # 執筆と切り離した検品AI。別モデルを指定してもよい
+    max_change_ratio: 0.35  # これ以上書き換わったら人間レビューに回す
+    banned_phrases:
+      - "いかがでしたでしょうか"
+      - "本記事では"
+      - "〜ではないでしょうか"
+      - "まとめると、"
+      - "重要なポイントは"
+      - "ぜひ参考にしてみてください"
+      - "近年、"
+      - "〜と言えるでしょう"
+
+  # --- デザイン担当：表紙と記事内の画像を作る ---
+  design:
+    cover_width: 1280
+    cover_height: 670       # note の見出し画像の推奨比率
+    inline_images: 2
+    palette:
+      - "#0f172a"
+      - "#1d4ed8"
+      - "#f8fafc"
+      - "#f59e0b"
+
+  # --- 営業担当：集客ポストを作って予約投稿まで済ませる ---
+  sales:
+    channels: ["x", "threads"]
+    posts_per_article: 3
+    # 公開からの経過時間（時間）ごとに1本ずつ予約する
+    schedule_offsets_hours: [0, 24, 72]
+    # 予約は各日のこの時刻に寄せる（24時間表記）
+    preferred_hours: [8, 12, 21]
+    autopost: false         # true にすると実際に API 投稿する（要 docs/legal-and-risk.md）
+
+# ---------------- 運営リズム ----------------
+operations:
+  articles_per_week: 3
+
+# ---------------- 収益計算の前提 ----------------
+# 注意: 手数料率は改定されます。運用前に note の公式ヘルプで最新値を確認し、
+#       ここを実測値に合わせてください（docs/business-plan.md 参照）。
+economics:
+  platform_fee_rate: 0.15   # 決済手数料（カード決済想定の概算・要確認）
+  note_fee_rate: 0.10       # note 利用料（決済手数料を引いた残りに対して・要確認）
+  withdrawal_fee: 270       # 振込手数料（1回あたり・要確認）
+  variable_cost_per_article: 120   # API利用料・素材費などの想定変動費
+
+# ---------------- 生成モデル設定 ----------------
+llm:
+  model: "claude-opus-5"
+  effort: "high"            # low / medium / high / xhigh / max
+  max_tokens_short: 16000   # 企画・告知など短い生成
+  max_tokens_long: 64000    # 本文執筆・検品（ストリーミング）
+
+# ---------------- 出力先 ----------------
+paths:
+  out_dir: "out"
+  db_path: "data/noteshop.db"
