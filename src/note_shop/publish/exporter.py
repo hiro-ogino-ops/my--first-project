@@ -23,12 +23,15 @@ def build_product(settings: Settings, store: Store, slug: str) -> Product:
     if article is None:
         raise KeyError(f"記事 {slug} が見つかりません")
 
-    price = decide_price(article.topic, settings)
     # 有料ラインは、実際に貼る本文（=H1を落とした後）の段落番号で数える。
+    body = body_without_title(article.body)
+    index = paid_line_index(body, settings.product.free_ratio)
+    # 有料エリアが1段落も残らないなら、それは無料記事。値段をつけない。
+    price = 0 if is_free(body, index) else decide_price(article.topic, settings)
     return Product(
         article=article,
         price=price,
-        paid_line_index=paid_line_index(body_without_title(article.body), settings.product.free_ratio),
+        paid_line_index=index,
         tags=build_tags(article.topic, settings.product.tags_per_article),
         assets=store.get_assets(slug),
     )
@@ -69,18 +72,23 @@ def render_markdown(product: Product) -> str:
     paragraphs = strip_title(split_paragraphs(product.article.body))
     index = min(product.paid_line_index, len(paragraphs))
 
-    head = paragraphs[:index]
-    tail = paragraphs[index:]
-
     blocks: list[str] = []
     if product.article.lead:
         blocks.append(product.article.lead)
-    blocks.extend(head)
-    if product.article.paid_teaser:
-        blocks.append(f"### この先で分かること\n\n{product.article.paid_teaser}")
-    blocks.append(PAID_MARKER)
-    blocks.extend(tail)
+    blocks.extend(paragraphs[:index])
+
+    # 全文無料の記事には有料ラインもティーザーも入れない。
+    if index < len(paragraphs):
+        if product.article.paid_teaser:
+            blocks.append(f"### この先で分かること\n\n{product.article.paid_teaser}")
+        blocks.append(PAID_MARKER)
+        blocks.extend(paragraphs[index:])
     return "\n\n".join(blocks).strip() + "\n"
+
+
+def is_free(body: str, paid_line_index: int) -> bool:
+    """有料エリアが1段落も残らない＝無料記事か。"""
+    return paid_line_index >= len(split_paragraphs(body))
 
 
 def strip_title(paragraphs: list[str]) -> list[str]:
