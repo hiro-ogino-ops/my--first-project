@@ -1,3 +1,3 @@
 source,external_id,url,author,text,likes,reposts,replies,posted_at
-manual,manual:0001,https://example.com/post/1,observer,"見出し画像を統一しただけで回遊率が上がった話",620,88,31,2026-08-19T09:00:00
-manual,manual:0002,https://example.com/post/2,observer,"予約投稿を3本に分けたら、公開初日より3日目のほうが売れた",710,102,45,2026-08-19T09:30:00
+manual,manual:0001,https://example.com/post/1,observer,"退職者のVPNアカウントが半年放置されていた話。棚卸しの手順を決めていない会社が多い",640,95,42,2026-08-19T09:00:00
+manual,manual:0002,https://example.com/post/2,observer,"社給PCを配らずBYODでリモートを回す場合、VPNより先に決めるべきことがある",520,78,36,2026-08-19T09:30:00
