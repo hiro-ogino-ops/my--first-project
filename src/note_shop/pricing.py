@@ -32,10 +32,13 @@ def paid_line_index(body: str, free_ratio: float) -> int:
     """無料で読ませる割合から、有料ラインを置く段落インデックスを決める。
 
     見出しの直後で切ると読者が宙ぶらりんになるため、見出しの手前まで戻す。
+    free_ratio が 1.0 以上なら段落数をそのまま返す。有料エリアが無い＝全文無料。
     """
     paragraphs = split_paragraphs(body)
     if not paragraphs:
         return 0
+    if free_ratio >= 1.0:
+        return len(paragraphs)
 
     target_chars = sum(len(p) for p in paragraphs) * free_ratio
     running = 0

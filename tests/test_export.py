@@ -96,3 +96,48 @@ def test_有料ラインの位置がH1除去後の段落番号と一致する(se
     # index 以降は無料側に出ていない
     for paragraph in paragraphs[product.paid_line_index :]:
         assert paragraph not in free
+
+
+def test_全文無料の記事には有料ラインが入らない(settings, tmp_path):
+    """free_ratio を 1.0 にすると、マーカーもティーザーも出ないこと。"""
+    from note_shop.publish.exporter import build_product
+    from note_shop.store import Store
+
+    object.__setattr__(settings.product, "free_ratio", 1.0)
+    store = Store(tmp_path / "t.db")
+    source = _product()
+    store.save_topic(source.article.topic)
+    store.save_article(source.article)
+
+    product = build_product(settings, store, source.article.topic.slug)
+    markdown = render_markdown(product)
+
+    assert PAID_MARKER not in markdown
+    assert "この先で分かること" not in markdown
+    assert "見出しB" in markdown, "本文が途中で切れている"
+
+
+def test_全文無料の記事は値段がつかない(settings, tmp_path):
+    from note_shop.publish.exporter import build_product
+    from note_shop.store import Store
+
+    object.__setattr__(settings.product, "free_ratio", 1.0)
+    store = Store(tmp_path / "t.db")
+    source = _product()
+    store.save_topic(source.article.topic)
+    store.save_article(source.article)
+
+    assert build_product(settings, store, source.article.topic.slug).price == 0
+
+
+def test_通常の記事は値段がつく(settings, tmp_path):
+    from note_shop.publish.exporter import build_product
+    from note_shop.store import Store
+
+    store = Store(tmp_path / "t.db")
+    source = _product()
+    store.save_topic(source.article.topic)
+    store.save_article(source.article)
+
+    product = build_product(settings, store, source.article.topic.slug)
+    assert product.price >= settings.product.price.min
