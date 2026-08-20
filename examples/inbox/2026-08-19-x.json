@@ -1,0 +1,35 @@
+[
+  {
+    "source": "x",
+    "external_id": "x:1900000000000000001",
+    "url": "https://x.com/i/status/1900000000000000001",
+    "author": "example_user",
+    "text": "議事録の書き起こしを自動化したら会議後の作業が40分→7分になった。手順はテンプレ化できる。",
+    "likes": 1840,
+    "reposts": 312,
+    "replies": 96,
+    "posted_at": "2026-08-19T07:12:00"
+  },
+  {
+    "source": "x",
+    "external_id": "x:1900000000000000002",
+    "url": "https://x.com/i/status/1900000000000000002",
+    "author": "another_user",
+    "text": "個人でnoteを売るとき、無料パートの切り方だけで購入率が倍変わる。ここを設計してない人が多すぎる。",
+    "likes": 2210,
+    "reposts": 488,
+    "replies": 154,
+    "posted_at": "2026-08-19T06:40:00"
+  },
+  {
+    "source": "threads",
+    "external_id": "threads:18000000000000001",
+    "url": "https://www.threads.net/@example/post/abc",
+    "author": "example",
+    "text": "AIに文章を書かせると、どうしても『いかがでしたでしょうか』的な匂いが残る。そこだけ直す工程が要る。",
+    "likes": 940,
+    "reposts": 121,
+    "replies": 77,
+    "posted_at": "2026-08-19T08:05:00"
+  }
+]
