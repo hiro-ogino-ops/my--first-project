@@ -53,6 +53,9 @@
     border:1px solid var(--line); background:var(--bg); color:var(--ink); cursor:pointer}
   button:hover{border-color:var(--muted)}
   button.primary{background:var(--work); border-color:var(--work); color:#fff}
+  button:disabled{opacity:.38; cursor:default}
+  button:disabled:hover{border-color:var(--line)}
+  .btns .spacer{flex:1 0 8px}
 
   h2{font-size:12px; font-weight:600; color:var(--muted); letter-spacing:.06em; margin:0 0 12px}
   ol{list-style:none; margin:0; padding:0}
@@ -61,6 +64,7 @@
   ol time{font-variant-numeric:tabular-nums; font-weight:600; min-width:64px}
   ol span{font-size:13px; color:var(--muted)}
   ol li.soon time{color:var(--accent)}
+  ol li span:only-child{color:var(--muted); font-size:13px}
   .hint{font-size:12px; color:var(--muted); margin:12px 0 0; line-height:1.6}
 
   #flash{position:fixed; inset:0; background:#fff; opacity:0; pointer-events:none; z-index:99}
@@ -99,12 +103,15 @@
       <label class="check"><input type="checkbox" id="awake" checked>画面を消さない</label>
     </div>
     <div class="btns">
-      <button class="primary" id="now">今すぐ開始</button>
+      <button class="primary" id="go">スタート</button>
+      <button id="stop">停止</button>
+      <button id="reset">リセット</button>
+      <span class="spacer"></span>
       <button id="test">テスト点灯</button>
       <button id="full">全画面</button>
     </div>
-    <p class="hint">設定はこの端末に保存されます。時計に合わせて動くので、タブを裏にしていても切り替え時刻はずれません。<br>
-    点滅は約2Hz（光感受性発作の目安3Hz未満）に抑えています。</p>
+    <p class="hint">スタートはその場から作業を開始します（停止からの再開は残り時間を引き継ぎます）。リセットは先頭に戻して停止し、開始時刻がまだ先ならその時刻に自動で始まります。<br>
+    設定はこの端末に保存されます。時計に合わせて動くので、タブを裏にしていても切り替え時刻はずれません。点滅は約2Hz（光感受性発作の目安3Hz未満）に抑えています。</p>
   </div>
 
   <div class="card">
@@ -121,10 +128,10 @@
     badge:$("badge"), phase:$("phase"), clock:$("clock"), nextAt:$("nextAt"), cycleNo:$("cycleNo"),
     bar:$("bar"), segFrom:$("segFrom"), segTo:$("segTo"), list:$("list"), flash:$("flash"),
     start:$("start"), work:$("work"), brk:$("brk"),
-    sound:$("sound"), atStart:$("atStart"), awake:$("awake")
+    sound:$("sound"), atStart:$("atStart"), awake:$("awake"),
+    go:$("go"), stop:$("stop"), reset:$("reset")
   };
-  var KEY = "flash-timer-v1";
-  var MIN = 60000;
+  var KEY = "flash-timer-v1", MIN = 60000;
 
   /* ---------- 設定の保存と復元 ---------- */
   function loadSettings(){
@@ -149,41 +156,56 @@
     }catch(e){}
   }
 
-  /* ---------- 設定値の読み出し ---------- */
+  /* ---------- 設定値 ---------- */
   function minutes(input, fallback){
     var v = parseInt(input.value, 10);
     if(!isFinite(v) || v < 1) v = fallback;
-    if(v > 600) v = 600;
-    return v;
+    return v > 600 ? 600 : v;
+  }
+  function conf(){
+    var W = minutes(el.work, 50) * MIN, B = minutes(el.brk, 10) * MIN;
+    return {W:W, B:B, C:W + B};
   }
   function startOfToday(now){
     var m = /^(\d{1,2}):(\d{2})/.exec(el.start.value || "08:30");
     var h = m ? Math.min(23, +m[1]) : 8, mi = m ? Math.min(59, +m[2]) : 30;
-    var d = new Date(now);
-    d.setHours(h, mi, 0, 0);
-    return d.getTime();
+    var d = new Date(now); d.setHours(h, mi, 0, 0); return d.getTime();
   }
 
-  /* ---------- 時刻からいまの状態を求める（経過の積み上げではなく壁時計基準） ---------- */
-  function snapshot(now){
-    var W = minutes(el.work, 50) * MIN, B = minutes(el.brk, 10) * MIN, C = W + B;
-    var start = startOfToday(now), elapsed = now - start;
-    if(elapsed < 0) return {kind:"wait", start:start, from:now, to:start, W:W, B:B, C:C, cycle:0};
-    var full = Math.floor(elapsed / C), rem = elapsed % C, base = start + full * C;
-    return rem < W
-      ? {kind:"work",  start:start, from:base,     to:base + W, W:W, B:B, C:C, cycle:full + 1}
-      : {kind:"break", start:start, from:base + W, to:base + C, W:W, B:B, C:C, cycle:full + 1};
+  /* ---------- 状態 ----------
+     anchor : スケジュールの起点。ここから 作業→休憩 が繰り返される
+     held   : 停止中に保持している「anchor からの経過」。null なら頭出し（未開始）
+     running: 進行中かどうか。残り時間は毎回 anchor と時計から計算するのでずれない  */
+  var anchor = null, held = null, running = false, seen = null, last = null;
+
+  function segmentAt(t){
+    var c = conf(), e = t - anchor, full = Math.floor(e / c.C), rem = e % c.C, base = anchor + full * c.C;
+    var s = rem < c.W
+      ? {kind:"work",  from:base,       to:base + c.W}
+      : {kind:"break", from:base + c.W, to:base + c.C};
+    s.base = base; s.cycle = full + 1; s.W = c.W; s.B = c.B; s.C = c.C;
+    return s;
   }
-  // 開始からいままでに起きたフラッシュの回数。取りこぼしの検出に使う。
+  // いま画面に出すべき状態。at は残り時間の計算に使う「時刻」（一時停止中は止めた時刻）
+  function view(now){
+    var c = conf();
+    if(running && now < anchor)
+      return {state:"wait", kind:"wait", at:now, from:now, to:anchor, base:anchor, cycle:0, W:c.W, B:c.B, C:c.C};
+    if(running){ var s = segmentAt(now); s.state = "run"; s.at = now; return s; }
+    if(held !== null && held > 0){ var p = segmentAt(anchor + held); p.state = "paused"; p.at = anchor + held; return p; }
+    if(held === null && anchor !== null && now < anchor)
+      return {state:"wait", kind:"wait", at:now, from:now, to:anchor, base:anchor, cycle:0, W:c.W, B:c.B, C:c.C};
+    return {state:"idle", kind:"idle", at:0, from:0, to:c.W, base:0, cycle:0, W:c.W, B:c.B, C:c.C};
+  }
+
+  // anchor からいままでに起きたフラッシュの回数。取りこぼしの検出に使う
   function flashCount(now){
-    var W = minutes(el.work, 50) * MIN, B = minutes(el.brk, 10) * MIN, C = W + B;
-    var elapsed = now - startOfToday(now);
-    if(elapsed < 0) return 0;
-    return Math.floor(elapsed / C) * 2 + (elapsed % C >= W ? 1 : 0);
+    if(anchor === null || now < anchor) return 0;
+    var c = conf(), e = now - anchor;
+    return Math.floor(e / c.C) * 2 + (e % c.C >= c.W ? 1 : 0);
   }
-  // i 回目（1始まり）のフラッシュの時刻
-  function flashTime(start, W, C, i){
-    return start + Math.floor((i - 1) / 2) * C + (i % 2 === 1 ? W : C);
+  function flashTime(W, C, i){
+    return anchor + Math.floor((i - 1) / 2) * C + (i % 2 === 1 ? W : C);
   }
 
   /* ---------- 表示 ---------- */
@@ -194,31 +216,56 @@
     return (h ? h + ":" + two(m) : m) + ":" + two(s % 60);
   }
 
-  var LABEL = {wait:"開始待ち", work:"作業中", break:"休憩中"};
-  var COLOR = {wait:"var(--wait)", work:"var(--work)", break:"var(--brk)"};
+  var LABEL = {wait:"開始待ち", run:{work:"作業中", "break":"休憩中"}, paused:"一時停止", idle:"停止中"};
+  var COLOR = {work:"var(--work)", "break":"var(--brk)", wait:"var(--wait)", idle:"var(--wait)"};
 
   function render(now){
-    var s = snapshot(now);
-    document.documentElement.style.setProperty("--accent", COLOR[s.kind]);
-    el.badge.style.background = COLOR[s.kind];
-    el.phase.textContent = LABEL[s.kind];
-    el.clock.textContent = span(s.to - now);
-    el.nextAt.textContent = hhmm(s.to);
-    el.cycleNo.textContent = s.kind === "wait" ? "（" + hhmm(s.start) + " 開始）" : "／ " + s.cycle + "セット目";
-    el.segFrom.textContent = hhmm(s.from);
-    el.segTo.textContent = hhmm(s.to);
-    var total = s.to - s.from;
-    el.bar.style.width = (total > 0 ? Math.min(100, (now - s.from) / total * 100) : 0) + "%";
-    document.title = span(s.to - now) + " " + LABEL[s.kind] + " — フラッシュタイマー";
+    var v = view(now), live = v.state === "run" || v.state === "wait";
+    var color = live ? COLOR[v.kind] : COLOR.wait;
+    document.documentElement.style.setProperty("--accent", color);
+    el.badge.style.background = color;
+    el.phase.textContent = v.state === "run" ? LABEL.run[v.kind] : LABEL[v.state];
+    el.clock.textContent = span(v.to - v.at);
 
-    var html = "", n = flashCount(now);
-    for(var i = n + 1; i <= n + 6; i++){
-      var t = flashTime(s.start, s.W, s.C, i);
-      html += '<li' + (i === n + 1 ? ' class="soon"' : '') + '><time>' + hhmm(t) + "</time><span>"
-            + (i % 2 === 1 ? "作業おわり → 休憩 " + (s.B / MIN) + "分"
-                           : "休憩おわり → 作業 " + (s.W / MIN) + "分") + "</span></li>";
+    if(v.state === "run"){
+      el.nextAt.textContent = hhmm(v.to);
+      el.cycleNo.textContent = "／ " + v.cycle + "セット目";
+    }else if(v.state === "wait"){
+      el.nextAt.textContent = hhmm(v.to + v.W);
+      el.cycleNo.textContent = "／ " + hhmm(anchor) + " に開始";
+    }else if(v.state === "paused"){
+      el.nextAt.textContent = "—";
+      el.cycleNo.textContent = "／ " + (v.kind === "work" ? "作業" : "休憩") + "の途中で停止中";
+    }else{
+      el.nextAt.textContent = "—";
+      el.cycleNo.textContent = "／ スタートで開始します";
     }
-    el.list.innerHTML = html;
+
+    var total = v.to - v.from;
+    el.bar.style.width = (total > 0 ? Math.max(0, Math.min(100, (v.at - v.from) / total * 100)) : 0) + "%";
+    el.segFrom.textContent = live || v.state === "paused" ? hhmm(v.from) : "0:00";
+    el.segTo.textContent   = live || v.state === "paused" ? hhmm(v.to)   : span(v.W);
+
+    el.go.disabled = v.state === "run";
+    el.stop.disabled = !running && v.state !== "wait";   // 自動開始の待ちも止められる
+
+    document.title = span(v.to - v.at) + " "
+      + (v.state === "run" ? LABEL.run[v.kind] : LABEL[v.state]) + " — フラッシュタイマー";
+
+    if(live){
+      var html = "", n = flashCount(now);
+      for(var i = n + 1; i <= n + 6; i++){
+        var t = flashTime(v.W, v.C, i);
+        html += '<li' + (i === n + 1 ? ' class="soon"' : '') + '><time>' + hhmm(t) + "</time><span>"
+              + (i % 2 === 1 ? "作業おわり → 休憩 " + (v.B / MIN) + "分"
+                             : "休憩おわり → 作業 " + (v.W / MIN) + "分") + "</span></li>";
+      }
+      el.list.innerHTML = html;
+    }else{
+      el.list.innerHTML = "<li><span>" + (v.state === "paused"
+        ? "停止中です。スタートで残り " + span(v.to - v.at) + " から再開します。"
+        : "停止中です。スタートを押すと予定が入ります。") + "</span></li>";
+    }
   }
 
   /* ---------- 光らせる・鳴らす ---------- */
@@ -255,43 +302,65 @@
     if(el.awake.checked && document.visibilityState === "visible"){
       if(lock) return;
       navigator.wakeLock.request("screen").then(function(l){
-        lock = l;
-        l.addEventListener("release", function(){ lock = null; });
+        lock = l; l.addEventListener("release", function(){ lock = null; });
       }).catch(function(){});
     }else if(lock){
-      lock.release().catch(function(){});
-      lock = null;
+      lock.release().catch(function(){}); lock = null;
     }
   }
 
-  /* ---------- 本体のループ ---------- */
-  var seen = null;   // 直前に見たフラッシュ回数
-  var last = null;   // 直前に見た時刻（開始時刻をまたいだかの判定用）
-  function tick(){
-    var now = Date.now(), count = flashCount(now), start = startOfToday(now);
-    if(seen !== null && count > seen) flash();                                  // 裏タブやスリープで飛ばしても取りこぼさない
-    else if(el.atStart.checked && last !== null && last < start && now >= start) flash();
-    seen = count; last = now;
-    render(now);
-  }
-  function reset(){
-    saveSettings();
+  /* ---------- 操作 ---------- */
+  function resync(now){ seen = flashCount(now); last = now; }   // 直後に鳴らさないための同期
+  function refresh(){ var now = Date.now(); resync(now); render(now); }
+
+  function doStart(){
     var now = Date.now();
-    seen = flashCount(now); last = now;          // 設定変更の直後に鳴らさない
+    anchor = held !== null ? now - held : now;   // 一時停止からは残りをそのまま引き継ぐ
+    held = null; running = true;
+    saveSettings(); refresh();
+  }
+  function doStop(){
+    var now = Date.now();
+    held = running && now > anchor ? now - anchor : 0;
+    running = false;
+    refresh();
+  }
+  function doReset(){
+    var now = Date.now();
+    running = false; held = null; anchor = startOfToday(now);   // 開始時刻がまだ先なら自動で始まる
+    refresh();
+  }
+
+  /* ---------- 本体のループ ---------- */
+  function tick(){
+    var now = Date.now();
+    // 停止中で頭出しのまま開始時刻をまたいだら、そこから自動で始める
+    if(!running && held === null && anchor !== null && last !== null && last < anchor && now >= anchor){
+      running = true; resync(now);
+      if(el.atStart.checked) flash();
+    }else if(running && anchor !== null){
+      var count = flashCount(now);
+      if(seen !== null && count > seen) flash();               // 裏タブやスリープで飛ばしても取りこぼさない
+      else if(el.atStart.checked && last !== null && last < anchor && now >= anchor) flash();
+      seen = count;
+    }
+    last = now;
     render(now);
   }
 
   loadSettings();
-  [el.start, el.work, el.brk].forEach(function(i){ i.addEventListener("change", reset); });
+  el.start.addEventListener("change", function(){
+    var now = Date.now();
+    if(!running || now < anchor) anchor = startOfToday(now);   // 進行中の回は動かさない
+    saveSettings(); refresh();
+  });
+  [el.work, el.brk].forEach(function(i){ i.addEventListener("change", function(){ saveSettings(); refresh(); }); });
   [el.sound, el.atStart].forEach(function(i){ i.addEventListener("change", saveSettings); });
   el.awake.addEventListener("change", function(){ saveSettings(); updateWakeLock(); });
 
-  $("now").addEventListener("click", function(){
-    var d = new Date();
-    el.start.value = two(d.getHours()) + ":" + two(d.getMinutes());
-    reset();
-    if(el.atStart.checked) flash();
-  });
+  el.go.addEventListener("click", doStart);
+  el.stop.addEventListener("click", doStop);
+  el.reset.addEventListener("click", doReset);
   $("test").addEventListener("click", flash);
   $("full").addEventListener("click", function(){
     if(document.fullscreenElement) document.exitFullscreen();
@@ -302,7 +371,10 @@
     if(document.visibilityState === "visible") tick();
   });
 
-  reset();
+  // 開いた時点で開始時刻を過ぎていれば、その日のスケジュールに合流して進行中にする
+  anchor = startOfToday(Date.now());
+  running = true;
+  refresh();
   setInterval(tick, 250);
   updateWakeLock();
 })();
