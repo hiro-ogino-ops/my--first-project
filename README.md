@@ -131,6 +131,35 @@ noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投�
 
 ---
 
+## おまけ: spotify-lyrics
+
+このリポジトリには、note 自動販売会社とは独立したもう1つのアプリが入っています。
+**Spotify で再生中の曲の歌詞をネットから探して、再生位置に合わせて表示する**ターミナルアプリです。
+
+```bash
+pip install -e .
+# .env に SPOTIFY_CLIENT_ID を入れる（Client Secret は不要）
+spotify-lyrics login          # 初回だけ
+spotify-lyrics                # 再生中の曲の歌詞が流れ始める
+```
+
+| コマンド | 何をするか |
+|---|---|
+| `spotify-lyrics` | 再生中の曲の歌詞を、現在行をハイライトしながら表示し続ける |
+| `spotify-lyrics --once` | 1回だけ取得して標準出力に流す |
+| `spotify-lyrics search "曲名" -a "アーティスト"` | 曲を指定して歌詞を探す |
+| `spotify-lyrics status` | 設定とログイン状態を確認する |
+
+- 認可は **PKCE**。クライアントシークレットを手元に置きません。
+- 歌詞は **LRCLIB**（APIキー不要、同期歌詞あり）から。完全一致が外れたら装飾を落として検索し、
+  尺と曲名で採点して選びます。確信が持てなければ**何も出しません**。
+- Spotify は3秒に1回だけ見に行き、その間の再生位置は経過時間から推定します。
+- 依存は標準ライブラリだけです。
+
+詳細と設計上の判断 → [docs/spotify-lyrics.md](docs/spotify-lyrics.md)
+
+---
+
 ## ドキュメント
 
 | 文書 | 内容 |
@@ -138,9 +167,10 @@ noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投�
 | [docs/business-plan.md](docs/business-plan.md) | 収益モデル・単位経済・KPI・成長段階・やらないこと |
 | [docs/operations.md](docs/operations.md) | 日次/週次の運用手順、cron設定、トラブル対応 |
 | [docs/legal-and-risk.md](docs/legal-and-risk.md) | 各サービスの規約、法務上の注意、認証情報の扱い |
+| [docs/spotify-lyrics.md](docs/spotify-lyrics.md) | おまけアプリ `spotify-lyrics` の使い方と設計 |
 
 ## 開発
 
 ```bash
-pytest        # 40件。オフラインモードで6部署の通しテストまで含む
+pytest        # 124件。オフラインモードで6部署の通しテストと spotify-lyrics まで含む
 ```
