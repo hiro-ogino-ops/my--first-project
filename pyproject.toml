@@ -21,6 +21,7 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 noteshop = "note_shop.cli:main"
+spotify-lyrics = "spotify_lyrics.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
