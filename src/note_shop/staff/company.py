@@ -1,7 +1,8 @@
-"""会社そのもの。6部署を組み立てて、日々の動きを1本の流れにする。
+"""会社そのもの。部署を組み立てて、日々の動きを1本の流れにする。
 
 - morning(): リサーチ → 企画（毎朝の動き）
 - produce(): 執筆 → 検品 → デザイン → 営業 → 商品化（1記事を作り切る動き）
+- sns.daily(): 実績取込 → 振り返り → 型の分析 → 1日分のポストと時間割（SNS運用）
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from .planning import Planner
 from .qa import Inspector
 from .research import Researcher
 from .sales import SalesRep
+from .sns import SnsManager
 from .writing import Writer
 
 
@@ -36,6 +38,7 @@ class Company:
         self.inspector = Inspector(settings, self.store)
         self.designer = Designer(settings, self.llm, self.store)
         self.sales = SalesRep(settings, self.llm, self.store)
+        self.sns = SnsManager(settings, self.llm, self.store)
 
     def close(self) -> None:
         self.store.close()
