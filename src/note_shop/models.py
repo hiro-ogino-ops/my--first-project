@@ -150,6 +150,70 @@ class PromoDraft(BaseModel):
     hashtags: list[str] = Field(default_factory=list)
 
 
+# -------------------------------------------------------------- SNS運用担当
+class PostPattern(BaseModel):
+    """伸びているポストから抽出した『型』。"""
+
+    name: str = Field(description="型の名前。15文字以内。同じ型なら過去と同じ名前を使う")
+    hook_type: str = Field(description="書き出しの種類。指定された一覧から1つ選ぶ")
+    structure: str = Field(description="1行目→2行目→締め、の並びを一文で")
+    why_it_worked: str = Field(description="なぜ伸びたのか。読者心理の側から説明する")
+    template: str = Field(description="穴埋め式のテンプレート。【】で可変部分を示す")
+    evidence_ids: list[str] = Field(
+        default_factory=list, description="根拠にしたシグナルの external_id"
+    )
+
+
+class PatternAnalysis(BaseModel):
+    """毎朝SNS運用担当が出す『伸びた理由』の分析。"""
+
+    analysis_date: date
+    summary: str = Field(description="今日伸びているポストに共通することを3行以内で")
+    patterns: list[PostPattern]
+
+
+class DraftPost(BaseModel):
+    """自分のポスト案1本（時刻はコード側で決める）。"""
+
+    pattern: str = Field(description="使った型の名前。指定された一覧から選ぶ")
+    hook_type: str = Field(description="書き出しの種類。指定された一覧から選ぶ")
+    text: str = Field(description="投稿本文。1行目が書き出し")
+
+
+class DraftBatch(BaseModel):
+    """SNS運用担当の構造化出力。"""
+
+    posts: list[DraftPost]
+
+
+class DailyPost(BaseModel):
+    """時間割に入った自分のポスト1本と、その実績。"""
+
+    post_slug: str
+    draft_date: date
+    scheduled_at: datetime
+    pattern: str
+    hook_type: str
+    hook: str
+    text: str
+    external_id: str = ""
+    impressions: int | None = None
+    likes: int = 0
+    reposts: int = 0
+    replies: int = 0
+
+
+class PostMetric(BaseModel):
+    """X のアナリティクス等から取り込む1ポスト分の実績。"""
+
+    external_id: str = ""
+    text: str = ""
+    impressions: int
+    likes: int = 0
+    reposts: int = 0
+    replies: int = 0
+
+
 # -------------------------------------------------------------------- 商品/売上
 class Product(BaseModel):
     """note に貼れる状態まで仕上がった商品。"""

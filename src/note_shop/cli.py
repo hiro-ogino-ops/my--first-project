@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with Company(settings) as company:
             return args.handler(args, company) or 0
-    except (KeyError, RuntimeError, ValueError) as exc:
+    except (KeyError, RuntimeError, ValueError, FileNotFoundError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 1
 
@@ -118,6 +118,45 @@ def _cmd_sales(args, company: Company) -> int:
     elif args.action == "queue":
         for _, post in company.store.pending_posts(args.slug):
             print(f"{post.scheduled_at:%Y-%m-%d %H:%M} [{post.channel}] {post.text}")
+    return 0
+
+
+def _cmd_sns(args, company: Company) -> int:
+    sns = company.sns
+    day = _parse_date(args.date) if args.date else None
+    if args.action == "daily":
+        company.researcher.collect()
+        sns.daily()
+    elif args.action == "analyze":
+        if not args.skip_collect:
+            company.researcher.collect()
+        sns.analyze()
+    elif args.action == "draft":
+        sns.draft(day=day, count=args.count, force=args.force)
+    elif args.action == "metrics":
+        if args.value:
+            sns.import_metrics(Path(args.value))
+        else:
+            sns.import_metrics_inbox()
+    elif args.action == "review":
+        sns.review()
+    elif args.action == "blocked":
+        blocks = company.store.active_blocks()
+        if not blocks:
+            print("除外中の書き出しはありません")
+        for b in blocks:
+            print(f"[{b['kind']}] {b['value']}  （{b['reason']}／{b['expires_at'][:10]}まで）")
+    elif args.action == "unblock":
+        if not args.value:
+            raise ValueError("外したい書き出しを指定してください")
+        print(f"{company.store.unblock_hook(args.value)} 件を除外リストから外しました")
+    elif args.action == "today":
+        posts = company.store.daily_posts(day=day or date.today())
+        if not posts:
+            print("今日の時間割はまだありません。`noteshop sns draft` を実行してください。")
+        for p in posts:
+            imp = "" if p.impressions is None else f"  {p.impressions}imp"
+            print(f"{p.scheduled_at:%H:%M} [{p.pattern}/{p.hook_type}] {p.hook}{imp}")
     return 0
 
 
@@ -209,6 +248,17 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("path", nargs="?", help="import のときの CSV パス")
     p.add_argument("--slug", default=None, help="queue のときの絞り込み")
     p.set_defaults(handler=_cmd_sales)
+
+    p = sub.add_parser("sns", help="SNS運用担当: 伸びた型の分析・1日分のポスト・振り返り・時間割")
+    p.add_argument("action", nargs="?", default="daily",
+                   choices=["daily", "analyze", "draft", "metrics", "review",
+                            "blocked", "unblock", "today"])
+    p.add_argument("value", nargs="?", help="metrics: CSV パス / unblock: 外す書き出し")
+    p.add_argument("--date", default=None, help="対象日 (YYYY-MM-DD)。既定は今日")
+    p.add_argument("--count", type=int, default=None, help="作る本数。既定は設定の posts_per_day")
+    p.add_argument("--force", action="store_true", help="作成済みの日を作り直す")
+    p.add_argument("--skip-collect", action="store_true", help="analyze で収集を省く")
+    p.set_defaults(handler=_cmd_sns)
 
     p = sub.add_parser("topics", help="企画の一覧")
     p.add_argument("--status", default=None,

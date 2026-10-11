@@ -89,6 +89,32 @@ class SalesConfig:
 
 
 @dataclass(frozen=True)
+class SnsConfig:
+    """SNS運用担当。company.yaml に無くても既定値で動く。"""
+
+    posts_per_day: int = 8
+    candidates_ratio: float = 1.5     # 何倍の案を作って、そこから選別するか
+    signals_for_analysis: int = 30
+    patterns_per_analysis: int = 6
+    hook_types: list[str] = field(default_factory=lambda: [
+        "数字", "問いかけ", "失敗談", "断言", "比較", "あるある", "手順予告", "引用",
+    ])
+    slot_times: list[str] = field(default_factory=lambda: [
+        "07:00", "07:30", "08:00", "09:00", "12:00", "12:30", "15:00",
+        "18:00", "19:00", "20:00", "21:00", "22:00", "23:00",
+    ])
+    min_gap_minutes: int = 60
+    review_days: int = 14
+    min_samples: int = 2
+    win_ratio: float = 1.3
+    lose_ratio: float = 0.7
+    block_days: int = 30
+    hook_similarity: float = 0.75
+    source_similarity: float = 0.6
+    metrics_inbox: str = "data/metrics"
+
+
+@dataclass(frozen=True)
 class Staff:
     research: ResearchConfig
     planning: PlanningConfig
@@ -96,6 +122,7 @@ class Staff:
     qa: QAConfig
     design: DesignConfig
     sales: SalesConfig
+    sns: SnsConfig = field(default_factory=SnsConfig)
 
 
 @dataclass(frozen=True)
@@ -175,6 +202,7 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
         qa=QAConfig(**staff_raw["qa"]),
         design=DesignConfig(**staff_raw["design"]),
         sales=SalesConfig(**staff_raw["sales"]),
+        sns=SnsConfig(**(staff_raw.get("sns") or {})),
     )
 
     paths = data.get("paths", {})

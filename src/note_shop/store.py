@@ -13,7 +13,11 @@ from typing import Any, Iterable
 
 from .models import (
     Article,
+    DailyPost,
     DesignAsset,
+    PatternAnalysis,
+    PostMetric,
+    PostPattern,
     PromoPost,
     QAReport,
     ResearchBrief,
@@ -92,6 +96,40 @@ CREATE TABLE IF NOT EXISTS sales (
     unit_price INTEGER NOT NULL,
     source     TEXT NOT NULL,
     UNIQUE(sale_date, slug, unit_price, source)
+);
+CREATE TABLE IF NOT EXISTS pattern_analyses (
+    analysis_date TEXT PRIMARY KEY,
+    summary       TEXT NOT NULL,
+    payload       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS patterns (
+    name       TEXT PRIMARY KEY,
+    first_seen TEXT NOT NULL,
+    last_seen  TEXT NOT NULL,
+    payload    TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS daily_posts (
+    post_slug    TEXT PRIMARY KEY,
+    draft_date   TEXT NOT NULL,
+    scheduled_at TEXT NOT NULL,
+    pattern      TEXT NOT NULL,
+    hook_type    TEXT NOT NULL,
+    hook         TEXT NOT NULL,
+    text         TEXT NOT NULL,
+    external_id  TEXT DEFAULT '',
+    impressions  INTEGER,
+    likes        INTEGER DEFAULT 0,
+    reposts      INTEGER DEFAULT 0,
+    replies      INTEGER DEFAULT 0,
+    measured_at  TEXT
+);
+CREATE TABLE IF NOT EXISTS blocked_hooks (
+    kind       TEXT NOT NULL,   -- text: 書き出しの文面 / type: 書き出しの種類
+    value      TEXT NOT NULL,
+    reason     TEXT,
+    blocked_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    PRIMARY KEY (kind, value)
 );
 """
 
@@ -308,6 +346,120 @@ class Store:
         )
         self.conn.commit()
 
+    # ----------------------------------------------------------- SNS運用
+    def save_pattern_analysis(self, analysis: PatternAnalysis) -> None:
+        """分析を保存し、型を型ライブラリに積む（同名の型は上書きして最終観測日を更新）。"""
+        day = analysis.analysis_date.isoformat()
+        self.conn.execute(
+            "INSERT OR REPLACE INTO pattern_analyses (analysis_date, summary, payload) VALUES (?,?,?)",
+            (day, analysis.summary, analysis.model_dump_json()),
+        )
+        for pattern in analysis.patterns:
+            self.conn.execute(
+                """INSERT INTO patterns (name, first_seen, last_seen, payload) VALUES (?,?,?,?)
+                   ON CONFLICT(name) DO UPDATE SET last_seen = excluded.last_seen,
+                                                   payload = excluded.payload""",
+                (pattern.name, day, day, pattern.model_dump_json()),
+            )
+        self.conn.commit()
+
+    def latest_pattern_analysis(self) -> PatternAnalysis | None:
+        row = self.conn.execute(
+            "SELECT payload FROM pattern_analyses ORDER BY analysis_date DESC LIMIT 1"
+        ).fetchone()
+        return PatternAnalysis.model_validate_json(row["payload"]) if row else None
+
+    def pattern_library(self) -> dict[str, PostPattern]:
+        rows = self.conn.execute("SELECT payload FROM patterns ORDER BY last_seen DESC").fetchall()
+        patterns = [PostPattern.model_validate_json(r["payload"]) for r in rows]
+        return {p.name: p for p in patterns}
+
+    def save_daily_posts(self, posts: Iterable[DailyPost]) -> int:
+        added = 0
+        for p in posts:
+            cur = self.conn.execute(
+                """INSERT OR IGNORE INTO daily_posts
+                   (post_slug, draft_date, scheduled_at, pattern, hook_type, hook, text)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (p.post_slug, p.draft_date.isoformat(), _iso(p.scheduled_at),
+                 p.pattern, p.hook_type, p.hook, p.text),
+            )
+            added += cur.rowcount
+        self.conn.commit()
+        return added
+
+    def daily_posts(self, since: date | None = None, *, day: date | None = None,
+                    measured_only: bool = False) -> list[DailyPost]:
+        """自分のポストを古い順に返す。投稿IDは予約台帳（posts）の値で補う。"""
+        sql = """SELECT d.*, COALESCE(NULLIF(d.external_id, ''), p.external_id, '') AS ext
+                 FROM daily_posts d
+                 LEFT JOIN posts p ON p.slug = d.post_slug AND p.channel = 'x'
+                 WHERE 1 = 1"""
+        args: list[Any] = []
+        if since:
+            sql += " AND d.draft_date >= ?"
+            args.append(since.isoformat())
+        if day:
+            sql += " AND d.draft_date = ?"
+            args.append(day.isoformat())
+        if measured_only:
+            sql += " AND d.impressions IS NOT NULL"
+        rows = self.conn.execute(sql + " ORDER BY d.scheduled_at", args).fetchall()
+        return [_row_to_daily_post(r) for r in rows]
+
+    def record_metric(self, post_slug: str, metric: PostMetric) -> None:
+        self.conn.execute(
+            """UPDATE daily_posts SET impressions = ?, likes = ?, reposts = ?, replies = ?,
+                      external_id = CASE WHEN ? != '' THEN ? ELSE external_id END,
+                      measured_at = ?
+               WHERE post_slug = ?""",
+            (metric.impressions, metric.likes, metric.reposts, metric.replies,
+             metric.external_id, metric.external_id, datetime.now().isoformat(), post_slug),
+        )
+        self.conn.commit()
+
+    def clear_daily_posts(self, day: date) -> int:
+        """その日の未計測ポストと、まだ投稿していない予約を消す（作り直し用）。"""
+        prefix = f"daily-{day:%Y%m%d}-%"
+        self.conn.execute(
+            "DELETE FROM posts WHERE slug LIKE ? AND status = 'scheduled'", (prefix,)
+        )
+        cur = self.conn.execute(
+            "DELETE FROM daily_posts WHERE draft_date = ? AND impressions IS NULL",
+            (day.isoformat(),),
+        )
+        self.conn.commit()
+        return cur.rowcount
+
+    def block_hook(self, kind: str, value: str, reason: str, expires_at: datetime) -> bool:
+        """書き出しを除外リストに入れる。新規なら True。既存なら期限だけ延ばす。"""
+        exists = self.conn.execute(
+            "SELECT 1 FROM blocked_hooks WHERE kind = ? AND value = ?", (kind, value)
+        ).fetchone()
+        self.conn.execute(
+            """INSERT INTO blocked_hooks (kind, value, reason, blocked_at, expires_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(kind, value) DO UPDATE SET reason = excluded.reason,
+                                                      expires_at = excluded.expires_at""",
+            (kind, value, reason, datetime.now().isoformat(), _iso(expires_at)),
+        )
+        self.conn.commit()
+        return exists is None
+
+    def active_blocks(self, now: datetime | None = None) -> list[dict[str, Any]]:
+        now = now or datetime.now()
+        rows = self.conn.execute(
+            """SELECT kind, value, reason, blocked_at, expires_at FROM blocked_hooks
+               WHERE expires_at > ? ORDER BY kind, blocked_at""",
+            (now.isoformat(),),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def unblock_hook(self, value: str) -> int:
+        cur = self.conn.execute("DELETE FROM blocked_hooks WHERE value = ?", (value,))
+        self.conn.commit()
+        return cur.rowcount
+
     # -------------------------------------------------------------- 売上
     def import_sales(self, records: Iterable[SaleRecord]) -> int:
         added = 0
@@ -373,4 +525,21 @@ def _row_to_post(row: sqlite3.Row) -> PromoPost:
         status=row["status"],
         article_slug=row["slug"],
         external_id=row["external_id"] or "",
+    )
+
+
+def _row_to_daily_post(row: sqlite3.Row) -> DailyPost:
+    return DailyPost(
+        post_slug=row["post_slug"],
+        draft_date=date.fromisoformat(row["draft_date"]),
+        scheduled_at=datetime.fromisoformat(row["scheduled_at"]),
+        pattern=row["pattern"],
+        hook_type=row["hook_type"],
+        hook=row["hook"],
+        text=row["text"],
+        external_id=row["ext"] or "",
+        impressions=row["impressions"],
+        likes=row["likes"] or 0,
+        reposts=row["reposts"] or 0,
+        replies=row["replies"] or 0,
     )

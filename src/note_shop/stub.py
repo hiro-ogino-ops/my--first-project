@@ -14,7 +14,17 @@ from typing import TypeVar
 from pydantic import BaseModel
 
 from .config import Settings
-from .models import PromoDraft, ResearchBrief, Theme, Topic, TopicBatch
+from .models import (
+    DraftBatch,
+    DraftPost,
+    PatternAnalysis,
+    PostPattern,
+    PromoDraft,
+    ResearchBrief,
+    Theme,
+    Topic,
+    TopicBatch,
+)
 from .prompts import extract_tag
 
 T = TypeVar("T", bound=BaseModel)
@@ -115,6 +125,10 @@ class OfflineClient:
             return _cast(schema, self._topics(prompt))
         if schema is PromoDraft:
             return _cast(schema, self._promo(prompt))
+        if schema is PatternAnalysis:
+            return _cast(schema, self._patterns(prompt))
+        if schema is DraftBatch:
+            return _cast(schema, self._drafts(prompt))
         raise NotImplementedError(
             f"オフラインでは {schema.__name__} のスタブが未実装です"
         )
@@ -159,6 +173,29 @@ class OfflineClient:
         ]
         return TopicBatch(topics=topics)
 
+    def _patterns(self, prompt: str) -> PatternAnalysis:
+        return PatternAnalysis(
+            analysis_date=date.today(),
+            summary=f"[offline] シグナル {prompt.count('- [')} 件をスタブ分析しました。",
+            patterns=_offline_patterns(self.settings),
+        )
+
+    def _drafts(self, prompt: str) -> DraftBatch:
+        names = [line.lstrip("- ").split("（")[0] for line in extract_tag(prompt, "型").splitlines()
+                 if line.strip()] or ["その他"]
+        types = self.settings.staff.sns.hook_types or ["その他"]
+        wanted = int(extract_tag(prompt, "件数") or self.settings.staff.sns.posts_per_day)
+        return DraftBatch(
+            posts=[
+                DraftPost(
+                    pattern=names[i % len(names)],
+                    hook_type=types[i % len(types)],
+                    text=f"{OFFLINE_OPENINGS[i % len(OFFLINE_OPENINGS)]}\n[offline] 本文{i + 1}",
+                )
+                for i in range(wanted)
+            ]
+        )
+
     def _promo(self, prompt: str) -> PromoDraft:
         title = extract_tag(prompt, "タイトル") or "新しい記事"
         count = self.settings.staff.sales.posts_per_article
@@ -169,6 +206,23 @@ class OfflineClient:
             ],
             hashtags=["#note", "#生成AI"],
         )
+
+
+# スタブのポスト案。選別で「同じ日の書き出しと重複」に落ちないよう、書き出しを全部変えてある。
+OFFLINE_OPENINGS = [
+    "退職者のアカウント、最後に棚卸ししたのはいつですか。",
+    "VPNが遅い原因、回線だったことは一度もありません。",
+    "ひとり情シス3年目で一番後悔していること。",
+    "ゼロトラストは製品名ではありません。",
+    "VPN装置とクラウド型、30人規模ならどちらか。",
+    "在宅の日だけ社内システムが重い会社、あるあるです。",
+    "リモート環境の見直しは、この3手順から始めます。",
+    "「全部VPN経由にすれば安全」と言われたら要注意。",
+    "パスワード共有をやめられない会社が最初にやること。",
+    "ベンダーの比較表で、中小企業が見なくていい項目。",
+    "社給PCを配らない会社のリモート運用、実は成立します。",
+    "多要素認証を入れた翌週に起きる問い合わせ。",
+]
 
 
 def _cast(schema: type[T], value: BaseModel) -> T:
@@ -183,3 +237,18 @@ def _escape(text: str) -> str:
     return (
         text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     )
+
+
+def _offline_patterns(settings: Settings) -> list[PostPattern]:
+    types = settings.staff.sns.hook_types or ["数字"]
+    count = settings.staff.sns.patterns_per_analysis
+    return [
+        PostPattern(
+            name=f"[offline] 型{i + 1}",
+            hook_type=types[i % len(types)],
+            structure="書き出しで困りごとを示す→原因を1つに絞る→次の一手で締める",
+            why_it_worked="オフライン実行のため実データからの分析は行っていません",
+            template="【困りごと】。原因は【1つ】。まず【次の一手】。",
+        )
+        for i in range(count)
+    ]

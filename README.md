@@ -21,6 +21,7 @@ note の有料記事を「企画 → 執筆 → 検品 → デザイン → 告�
 | 検品担当 | `staff/qa.py` | **別コンテキストのAI**が、AIっぽい言い回しだけを人の文章に直す |
 | デザイン担当 | `staff/design.py` | 表紙と記事内の図をSVGで作り、PNGに変換する |
 | 営業担当 | `staff/sales.py` | 集客ポストを作り、公開からの経過時間に合わせて予約投稿する |
+| SNS運用担当 | `staff/sns.py` | 伸びた型で自分のポストを1日8本作り、インプで振り返って時間割を組む |
 
 ---
 
@@ -86,6 +87,24 @@ noteshop report --days 30
 
 取り込んだ売上は、次の企画と執筆の入力になります。**このループが閉じて初めて会社になります。**
 
+### 5. 自分の X を伸ばす（SNS運用担当）
+
+```bash
+noteshop sns daily            # 毎朝これだけ: ①〜⑤をまとめて実行
+```
+
+| 工程 | コマンド | 何をするか |
+|---|---|---|
+| ① 分析 | `noteshop sns analyze` | 伸びているポストを集め、伸びた理由を「型」にする |
+| ② 作成 | `noteshop sns draft` | その型で1日8本を作る（12案作って機械的に選別） |
+| ③ 振り返り | `noteshop sns metrics <csv>` → `noteshop sns review` | インプを取り込み、型・書き出し・時間帯ごとに伸びた／滑ったを判定 |
+| ④ 除外 | （review が自動で実行） | 滑った書き出しを30日間、次の案から外す。`noteshop sns blocked` で一覧 |
+| ⑤ 時間割 | （draft が自動で実行） | 伸びた時間帯から順に8枠を組み、予約台帳に入れる |
+
+成果物は `out/sns/<日付>.md`（その日の時間割と本文）と `out/sns/review-<日付>.md`（振り返り）です。
+判定・除外・時間割はコードが決めるので、同じ実績なら毎回同じ結論になります。
+詳細 → [docs/operations.md](docs/operations.md) の「SNS運用担当」
+
 ---
 
 ## コマンド一覧
@@ -99,6 +118,7 @@ noteshop write | qa | design | export | promote  <slug>
 noteshop sales [run-due|import|queue]
 noteshop topics [--status ...]
 noteshop report [--days N] [--out PATH]
+noteshop sns [daily|analyze|draft|metrics|review|blocked|unblock|today]
 noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投稿（既定で無効）
 ```
 
@@ -142,5 +162,5 @@ noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投�
 ## 開発
 
 ```bash
-pytest        # 40件。オフラインモードで6部署の通しテストまで含む
+pytest        # オフラインモードで全部署の通しテストまで含む
 ```
