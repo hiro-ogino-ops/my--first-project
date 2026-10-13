@@ -170,7 +170,10 @@ def _cmd_publish(args, company: Company) -> int:
     """note へのブラウザ自動投稿（オプトイン）。"""
     product = exporter.build_product(company.settings, company.store, args.slug)
     cover = next((a.path for a in product.assets if a.kind == "cover"), None)
-    markdown = exporter.render_markdown(product)
+    placements = exporter._affiliate_placements(company.settings, product)
+    markdown = exporter.render_markdown(
+        product, **exporter._affiliate_blocks(company.settings, placements)
+    )
     url = browser.publish_draft(
         product.article.topic.title,
         markdown,
