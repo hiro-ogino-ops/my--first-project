@@ -21,6 +21,7 @@ note の有料記事を「企画 → 執筆 → 検品 → デザイン → 告�
 | 検品担当 | `staff/qa.py` | **別コンテキストのAI**が、AIっぽい言い回しだけを人の文章に直す |
 | デザイン担当 | `staff/design.py` | 表紙と記事内の図をSVGで作り、PNGに変換する |
 | 営業担当 | `staff/sales.py` | 集客ポストを作り、公開からの経過時間に合わせて予約投稿する |
+| アフィリエイト担当 | `affiliate.py` | 本文に出た機材を商品台帳から選び、PR表記つきでAmazonリンクを差し込む（既定で無効） |
 
 ---
 
@@ -99,8 +100,20 @@ noteshop write | qa | design | export | promote  <slug>
 noteshop sales [run-due|import|queue]
 noteshop topics [--status ...]
 noteshop report [--days N] [--out PATH]
+noteshop affiliate [catalog|check <slug>|import <csv>]   # Amazonアソシエイト
 noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投稿（既定で無効）
 ```
+
+### Amazonアソシエイトを使う場合
+
+1. `config/amazon-catalog.yaml` に、自分で検証した商品を ASIN つきで登録する
+2. `config/company.yaml` の `affiliate.enabled` を `true`、`tracking_id` を自分のID（`-22` で終わる）にする
+3. いつも通り `noteshop produce <slug>` を実行すると、本文冒頭に広告表記と開示文、
+   末尾に「この記事で扱った機材」が入る。表記に不備があれば書き出し自体が止まる
+4. 月に一度、アソシエイトのレポートCSVをダウンロードして `noteshop affiliate import <csv>` →
+   `noteshop report` に商品別・掲載記事別の紹介料が出る
+
+規約上の注意 → [docs/legal-and-risk.md](docs/legal-and-risk.md) の「8. Amazonアソシエイト」
 
 ---
 
@@ -115,6 +128,8 @@ noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投�
 - **検品が書き換えすぎたら人間に回す。** 変更率と文字数の減少を機械的に測り、
   内容にまで手が入った疑いがあれば `needs_human_review` を立てます。
 - **画像は画像生成モデルを使わずSVG。** 文字が崩れず、ブランド色を強制でき、差分が読めるからです。
+- **アフィリエイト商品もAIが選ばない。** 人間が登録した台帳と本文のキーワード一致だけで決めます。
+  AIは存在しない ASIN を作れてしまうためです。価格も載せません。
 - **外に出るものは既定でオフ。** SNS 投稿も note 投稿も、明示的に有効化するまで
   ファイルに書き出すだけです。
 
@@ -142,5 +157,5 @@ noteshop publish <slug> --i-accept-tos    # note へブラウザで下書き投�
 ## 開発
 
 ```bash
-pytest        # 40件。オフラインモードで6部署の通しテストまで含む
+pytest        # 55件。オフラインモードで6部署の通しテストまで含む
 ```

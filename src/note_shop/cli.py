@@ -12,6 +12,7 @@ import sys
 from datetime import date, datetime
 from pathlib import Path
 
+from . import affiliate
 from .config import DEFAULT_CONFIG_PATH, load_settings
 from .models import SaleRecord
 from .publish import browser, exporter
@@ -51,7 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with Company(settings) as company:
             return args.handler(args, company) or 0
-    except (KeyError, RuntimeError, ValueError) as exc:
+    except (FileNotFoundError, KeyError, RuntimeError, ValueError) as exc:
         print(f"エラー: {exc}", file=sys.stderr)
         return 1
 
@@ -139,11 +140,40 @@ def _cmd_report(args, company: Company) -> int:
     return 0
 
 
+def _cmd_affiliate(args, company: Company) -> int:
+    config = company.settings.affiliate
+    if args.action == "catalog":
+        for item in affiliate.load_catalog(config.catalog_path):
+            mark = "検証済" if item.verified else "未検証"
+            print(f"{item.asin}  [{mark}]  {item.name}  ({', '.join(item.keywords)})")
+    elif args.action == "check":
+        if not args.target:
+            raise ValueError("check には slug を指定してください")
+        path = company.settings.out_dir / args.target / "note.md"
+        if not path.exists():
+            raise ValueError(f"{path} がありません。先に `noteshop export {args.target}` を実行してください")
+        issues = affiliate.check_compliance(path.read_text(encoding="utf-8"), config)
+        for issue in issues:
+            print(f"[{issue.level}] {issue.message}")
+        if not issues:
+            print("[affiliate] 問題は見つかりませんでした")
+        return 1 if any(i.level == "error" for i in issues) else 0
+    elif args.action == "import":
+        if not args.target:
+            raise ValueError("import には CSV のパスを指定してください")
+        added = company.store.import_earnings(affiliate.read_earnings_csv(Path(args.target)))
+        print(f"[affiliate] 紹介料 {added} 件を取り込みました")
+    return 0
+
+
 def _cmd_publish(args, company: Company) -> int:
     """note へのブラウザ自動投稿（オプトイン）。"""
     product = exporter.build_product(company.settings, company.store, args.slug)
     cover = next((a.path for a in product.assets if a.kind == "cover"), None)
-    markdown = exporter.render_markdown(product)
+    placements = exporter._affiliate_placements(company.settings, product)
+    markdown = exporter.render_markdown(
+        product, **exporter._affiliate_blocks(company.settings, placements)
+    )
     url = browser.publish_draft(
         product.article.topic.title,
         markdown,
@@ -219,6 +249,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--days", type=int, default=90)
     p.add_argument("--out", default=None, help="Markdown を保存するパス")
     p.set_defaults(handler=_cmd_report)
+
+    p = sub.add_parser("affiliate", help="アフィリエイト担当: 商品台帳・表記検査・紹介料の取り込み")
+    p.add_argument("action", choices=["catalog", "check", "import"])
+    p.add_argument("target", nargs="?", help="check のときは slug、import のときは CSV パス")
+    p.set_defaults(handler=_cmd_affiliate)
 
     p = sub.add_parser("publish", help="note へブラウザで下書き投稿（既定で無効）")
     p.add_argument("slug")

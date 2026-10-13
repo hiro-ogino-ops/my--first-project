@@ -93,6 +93,25 @@ CREATE TABLE IF NOT EXISTS sales (
     source     TEXT NOT NULL,
     UNIQUE(sale_date, slug, unit_price, source)
 );
+CREATE TABLE IF NOT EXISTS affiliate_placements (
+    slug TEXT NOT NULL,
+    asin TEXT NOT NULL,
+    name TEXT,
+    url  TEXT NOT NULL,
+    PRIMARY KEY (slug, asin)
+);
+CREATE TABLE IF NOT EXISTS affiliate_earnings (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date TEXT NOT NULL,
+    asin        TEXT NOT NULL,
+    name        TEXT,
+    clicks      INTEGER DEFAULT 0,
+    ordered     INTEGER DEFAULT 0,
+    shipped     INTEGER DEFAULT 0,
+    revenue     INTEGER DEFAULT 0,
+    tracking_id TEXT DEFAULT '',
+    UNIQUE(report_date, asin, tracking_id)
+);
 """
 
 
@@ -348,6 +367,51 @@ class Store:
             (since,),
         ).fetchone()
         return {"quantity": row["quantity"], "gross": row["gross"]}
+
+
+    # -------------------------------------------------------- アフィリエイト
+    def save_placements(self, slug: str, placements: Iterable[tuple[str, str, str]]) -> None:
+        """記事に差し込んだ商品を記録する。書き出し直したら入れ替える。"""
+        self.conn.execute("DELETE FROM affiliate_placements WHERE slug = ?", (slug,))
+        self.conn.executemany(
+            "INSERT INTO affiliate_placements (slug, asin, name, url) VALUES (?,?,?,?)",
+            [(slug, asin, name, url) for asin, name, url in placements],
+        )
+        self.conn.commit()
+
+    def import_earnings(self, records: Iterable[Any]) -> int:
+        """アソシエイトのレポート行を取り込む。同じ日・同じ商品は上書きしない。"""
+        added = 0
+        for r in records:
+            cur = self.conn.execute(
+                """INSERT OR IGNORE INTO affiliate_earnings
+                   (report_date, asin, name, clicks, ordered, shipped, revenue, tracking_id)
+                   VALUES (?,?,?,?,?,?,?,?)""",
+                (r.report_date.isoformat(), r.asin, r.name, r.clicks, r.ordered,
+                 r.shipped, r.revenue, r.tracking_id),
+            )
+            added += cur.rowcount
+        self.conn.commit()
+        return added
+
+    def earnings_summary(self, lookback_days: int = 90) -> list[dict[str, Any]]:
+        """商品ごとの紹介料と、その商品を載せている記事。"""
+        since = (date.today() - timedelta(days=lookback_days)).isoformat()
+        rows = self.conn.execute(
+            """SELECT e.asin,
+                      MAX(e.name)                        AS name,
+                      SUM(e.clicks)                      AS clicks,
+                      SUM(e.ordered)                     AS ordered,
+                      SUM(e.revenue)                     AS revenue,
+                      (SELECT GROUP_CONCAT(p.slug, ', ')
+                         FROM affiliate_placements p WHERE p.asin = e.asin) AS slugs
+               FROM affiliate_earnings e
+               WHERE e.report_date >= ?
+               GROUP BY e.asin
+               ORDER BY revenue DESC""",
+            (since,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 def _row_to_signal(row: sqlite3.Row) -> TrendSignal:

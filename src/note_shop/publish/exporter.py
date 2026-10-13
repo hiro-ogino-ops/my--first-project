@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .. import affiliate
 from ..config import Settings
 from ..models import Product
 from ..pricing import build_tags, decide_price, paid_line_index, split_paragraphs
@@ -40,14 +41,30 @@ def build_product(settings: Settings, store: Store, slug: str) -> Product:
 def export(settings: Settings, store: Store, slug: str) -> Path:
     """out/<slug>/ に note 入稿用の一式を書き出す。"""
     product = build_product(settings, store, slug)
+    placements = _affiliate_placements(settings, product)
+    markdown = render_markdown(product, **_affiliate_blocks(settings, placements))
+    # 規約に関わる不備は、ファイルを書き出す前に止める。直すまで入稿させない。
+    issues = affiliate.check_compliance(markdown, settings.affiliate) if placements else []
+    errors = [i.message for i in issues if i.level == "error"]
+    if errors:
+        raise RuntimeError("アフィリエイト表記に不備があります: " + " / ".join(errors))
+    for issue in issues:
+        print(f"[affiliate] 注意: {issue.message}")
+
     out_dir = settings.out_dir / slug
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    (out_dir / "note.md").write_text(render_markdown(product), encoding="utf-8")
+    (out_dir / "note.md").write_text(markdown, encoding="utf-8")
+    meta = _meta(product, store, slug)
+    meta["affiliate"] = [
+        {"asin": p.item.asin, "name": p.item.name, "url": p.url, "matched": p.matched,
+         "verified": p.item.verified}
+        for p in placements
+    ]
     (out_dir / "meta.json").write_text(
-        json.dumps(_meta(product, store, slug), ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+        json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8",
     )
+    store.save_placements(slug, [(p.item.asin, p.item.name, p.url) for p in placements])
 
     posts = store.pending_posts(slug)
     if posts:
@@ -60,19 +77,46 @@ def export(settings: Settings, store: Store, slug: str) -> Path:
 
     store.save_article(product.article, path=str(out_dir / "note.md"), price=product.price,
                        tags=product.tags)
-    print(f"[export] {out_dir} に書き出しました（{product.price}円 / タグ{len(product.tags)}個）")
+    print(f"[export] {out_dir} に書き出しました（{product.price}円 / タグ{len(product.tags)}個"
+          f" / Amazonリンク{len(placements)}件）")
     return out_dir
 
 
-def render_markdown(product: Product) -> str:
+def _affiliate_placements(settings: Settings, product: Product) -> list[affiliate.Placement]:
+    config = settings.affiliate
+    if not config.enabled:
+        return []
+    if not config.tracking_id:
+        raise RuntimeError("affiliate.enabled が true ですが affiliate.tracking_id が空です")
+    catalog = affiliate.load_catalog(config.catalog_path)
+    text = " ".join([product.article.topic.title, *product.article.topic.keywords,
+                     product.article.body])
+    return affiliate.select_products(text, catalog, config)
+
+
+def _affiliate_blocks(settings: Settings, placements: list[affiliate.Placement]) -> dict[str, str]:
+    if not placements:
+        return {}
+    return {
+        "header": affiliate.render_header(settings.affiliate),
+        "footer": affiliate.render_section(placements),
+    }
+
+
+def render_markdown(product: Product, *, header: str = "", footer: str = "") -> str:
     """有料ラインの位置に目印を入れた、貼り付け用の Markdown を作る。
 
     note はタイトルを本文と別のフィールドで持つため、本文先頭の H1 は落とす。
+    header は本文の最上部（広告表記）、footer は末尾（商品リンク）に置く。
+    footer は有料記事なら有料エリア側に入る＝買った人にしか見えない。
+    リンクを無料エリアに出すために本文を削らない、という方針。
     """
     paragraphs = strip_title(split_paragraphs(product.article.body))
     index = min(product.paid_line_index, len(paragraphs))
 
     blocks: list[str] = []
+    if header:
+        blocks.append(header)
     if product.article.lead:
         blocks.append(product.article.lead)
     blocks.extend(paragraphs[:index])
@@ -83,6 +127,8 @@ def render_markdown(product: Product) -> str:
             blocks.append(f"### この先で分かること\n\n{product.article.paid_teaser}")
         blocks.append(PAID_MARKER)
         blocks.extend(paragraphs[index:])
+    if footer:
+        blocks.append(footer)
     return "\n\n".join(blocks).strip() + "\n"
 
 

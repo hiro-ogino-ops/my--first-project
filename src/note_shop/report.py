@@ -64,8 +64,28 @@ def render(settings: Settings, store: Store, lookback_days: int = 90) -> str:
     else:
         lines.append("（売上データがまだありません。`noteshop sales import` で取り込んでください）")
 
+    if settings.affiliate.enabled:
+        lines += _affiliate_lines(store, lookback_days)
+
     lines += [
         "",
         "> 手数料率は config/company.yaml の前提値です。実際の入金額と必ず突き合わせてください。",
     ]
     return "\n".join(lines)
+
+
+def _affiliate_lines(store: Store, lookback_days: int) -> list[str]:
+    rows = store.earnings_summary(lookback_days)
+    lines = ["", "## Amazonアソシエイト", ""]
+    if not rows:
+        lines.append("（紹介料データがまだありません。`noteshop affiliate import` で取り込んでください）")
+        return lines
+    total = sum(r["revenue"] or 0 for r in rows)
+    lines.append(f"- 紹介料合計: {total:,} 円（確定前の数字を含む場合があります）")
+    lines += ["", "| 商品 | クリック | 注文 | 紹介料 | 掲載記事 |", "|---|---:|---:|---:|---|"]
+    for r in rows:
+        lines.append(
+            f"| {r['name'] or r['asin']} | {r['clicks'] or 0} | {r['ordered'] or 0} "
+            f"| {r['revenue'] or 0:,} | {r['slugs'] or '（記事に未掲載）'} |"
+        )
+    return lines

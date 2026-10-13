@@ -122,6 +122,21 @@ economics:
   withdrawal_fee: 270       # 振込手数料（1回あたり・要確認）
   variable_cost_per_article: 120   # API利用料・素材費などの想定変動費
 
+# ---------------- アフィリエイト（Amazonアソシエイト） ----------------
+# 書き出し時に、本文に出てきた機材を商品台帳から選んでリンクを差し込みます。
+# 有効化の前に docs/legal-and-risk.md の「8. Amazonアソシエイト」を必ず読んでください。
+affiliate:
+  enabled: false            # true にすると export / produce で自動差し込み
+  tracking_id: ""           # 例: "yourname-22"（アソシエイト管理画面のトラッキングID）
+  site_name: "リモートアクセス実務ノート"   # アソシエイトに登録したサイト名と一致させる
+  catalog_path: "config/amazon-catalog.yaml"
+  max_products_per_article: 3
+  min_keyword_hits: 1       # 本文に台帳のキーワードが何語出たら載せるか
+  allow_unverified: false   # 自分で検証していない商品は載せない（tone の方針と同じ）
+  pr_label: "【PR】この記事にはアフィリエイトリンクを含みます。"
+  # 開示文は規約で求められる文言です。運用前に最新の規約で文言を確認してください（要確認）
+  disclosure: "Amazonのアソシエイトとして、{site_name}は適格販売により収入を得ています。"
+
 # ---------------- 生成モデル設定 ----------------
 llm:
   model: "claude-opus-5"

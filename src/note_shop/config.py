@@ -112,6 +112,19 @@ class Economics:
 
 
 @dataclass(frozen=True)
+class AffiliateConfig:
+    enabled: bool = False
+    tracking_id: str = ""
+    site_name: str = ""
+    catalog_path: str = "config/amazon-catalog.yaml"
+    max_products_per_article: int = 3
+    min_keyword_hits: int = 1
+    allow_unverified: bool = False
+    pr_label: str = "【PR】この記事にはアフィリエイトリンクを含みます。"
+    disclosure: str = "Amazonのアソシエイトとして、{site_name}は適格販売により収入を得ています。"
+
+
+@dataclass(frozen=True)
 class LLMSettings:
     model: str
     effort: str
@@ -129,6 +142,7 @@ class Settings:
     llm: LLMSettings
     out_dir: Path
     db_path: Path
+    affiliate: AffiliateConfig = field(default_factory=AffiliateConfig)
 
     @property
     def offline(self) -> bool:
@@ -187,4 +201,6 @@ def load_settings(path: str | Path = DEFAULT_CONFIG_PATH) -> Settings:
         llm=LLMSettings(**_require(data, "llm")),
         out_dir=Path(paths.get("out_dir", "out")),
         db_path=Path(paths.get("db_path", "data/noteshop.db")),
+        # affiliate は任意。セクションが無ければ無効のまま動く。
+        affiliate=AffiliateConfig(**(data.get("affiliate") or {})),
     )
